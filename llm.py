@@ -26,6 +26,10 @@ _state = {"out_dir": Path("outputs"), "fresh": False, "last_call": 0.0, "json_mo
           "calls_made": 0, "calls_reused": 0, "names_used": set()}
 
 
+class ContextTooLong(Exception):
+    """The prompt is longer than this model/provider accepts. The caller splits the work into smaller pieces."""
+
+
 class QuotaExhausted(Exception):
     pass
 
@@ -217,6 +221,10 @@ def _post(messages):
             _state["json_mode"] = False
             return _post(messages)
 
+        if r.status_code in (400, 413) and re.search(
+                r"max_len|context.?length|context window|maximum context|too many tokens|too long|reduce the length|tokens? but",
+                r.text, re.IGNORECASE):
+            raise ContextTooLong(r.text[:200])
         if r.status_code == 429 and re.search(r"per ?day|PerDay|daily", r.text, re.IGNORECASE) and attempt >= 1:
             raise QuotaExhausted(r.text[:300])
         if r.status_code == 404 and os.environ.get("LLM_FALLBACK_MODELS"):

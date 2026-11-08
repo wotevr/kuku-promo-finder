@@ -102,18 +102,36 @@ def find_candidates(window, eps_df, lines_df, ctx, title, prefix="find"):
         title=title, summary=ctx["summary"], characters=ctx["characters"], reveals=ctx["reveals"],
         max_segments=config.MAX_SEGMENTS, min_s=config.MIN_PROMO_SECONDS, max_s=config.MAX_PROMO_SECONDS,
         max_promos=config.MAX_PROMOS_PER_WINDOW, episodes_text="\n\n".join(blocks))
-    answer = ask(f"{prefix}_e{window[0]:02d}-{window[-1]:02d}", prompts.FIND_SYSTEM, user)
+    try:
+        answer = ask(f"{prefix}_e{window[0]:02d}-{window[-1]:02d}", prompts.FIND_SYSTEM, user)
+    except llm.ContextTooLong:
+        if len(window) == 1:
+            print(f"    episode {window[0]} alone is too long for this model, skipped")
+            return []
+        half = (len(window) + 1) // 2
+        print(f"    episodes {window[0]}-{window[-1]} too long for this model, splitting into smaller pieces")
+        return (find_candidates(window[:half], eps_df, lines_df, ctx, title, prefix)
+                + find_candidates(window[half:], eps_df, lines_df, ctx, title, prefix))
     return answer.get("promos", []) if isinstance(answer, dict) else []
 
 
 # ------------------------------------------------------------------ step 4: JUDGE
-def judge(promos, lines_df):
+def judge(promos, lines_df, batch_size=None):
     results = {}
-    for i in range(0, len(promos), config.CLIPS_PER_JUDGE_CALL):
-        batch = promos[i:i + config.CLIPS_PER_JUDGE_CALL]
+    size = batch_size or config.CLIPS_PER_JUDGE_CALL
+    for i in range(0, len(promos), size):
+        batch = promos[i:i + size]
         clips = "\n\n".join(f"### CLIP {p['promo_id']}\n{checks.clip_text(p['segs'], lines_df)}" for p in batch)
-        answer = ask(f"judge_{batch[0]['promo_id']}-{batch[-1]['promo_id']}",
-                     prompts.JUDGE_SYSTEM, prompts.JUDGE_USER.format(n=len(batch), clips=clips))
+        try:
+            answer = ask(f"judge_{batch[0]['promo_id']}-{batch[-1]['promo_id']}",
+                         prompts.JUDGE_SYSTEM, prompts.JUDGE_USER.format(n=len(batch), clips=clips))
+        except llm.ContextTooLong:
+            if len(batch) == 1:
+                print(f"    clip {batch[0]['promo_id']} too long for this model, not judged")
+                continue
+            print("    judge batch too long for this model, using smaller batches")
+            results.update(judge(batch, lines_df, max(1, len(batch) // 2)))
+            continue
         clips = answer.get("clips") if isinstance(answer, dict) else None
         if not isinstance(clips, list):  # some models use another key: take the first list in the answer
             clips = next((v for v in answer.values() if isinstance(v, list)), []) if isinstance(answer, dict) else []
