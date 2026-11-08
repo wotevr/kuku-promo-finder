@@ -145,6 +145,18 @@ if "out" in st.session_state:
 
     promos = pd.read_json(out / "promos.json")
     funnel = pd.read_csv(out / "funnel.csv")
+    if promos.empty:
+        st.warning("The run finished, but no promo passed the checks (see the funnel and the rejection reasons "
+                   "below). This usually means the model is too weak to follow the timestamp rules: try a stronger "
+                   "model (e.g. gemini-3.6-flash or gemini-3.5-flash) or more episodes.")
+        st.dataframe(funnel, hide_index=True, width="stretch")
+        rejected = out / "rejected.csv"
+        if rejected.exists():
+            st.subheader("Rejected candidates")
+            st.dataframe(pd.read_csv(rejected), hide_index=True, width="stretch")
+        with st.expander("Run log"):
+            st.code(st.session_state["log"])
+        st.stop()
     st.success(f"Done: {len(promos)} promos ranked.")
 
     c1, c2 = st.columns([1, 2])
@@ -153,7 +165,9 @@ if "out" in st.session_state:
         st.dataframe(funnel, hide_index=True, width="stretch")
     with c2:
         st.subheader("Top 10")
-        top = promos.head(10)[["rank", "segments_text", "duration", "final_score", "moment_type", "hook", "cliffhanger"]]
+        cols = [c for c in ["rank", "segments_text", "duration", "final_score", "moment_type", "hook", "cliffhanger"]
+                if c in promos.columns]
+        top = promos.head(10)[cols]
         st.dataframe(top, hide_index=True, width="stretch")
 
     st.subheader("Ranked promos (full detail)")
