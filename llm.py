@@ -1,10 +1,9 @@
 """
 The ONLY file that talks to an AI model.
 
-It uses the "OpenAI-compatible" chat API, which Gemini, Groq, OpenRouter, GitHub Models,
-OpenAI, Ollama and many others all support. So swapping the model = editing 3 lines in .env:
-    LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
-No code change needed.
+It speaks two API "dialects": Google's native Gemini API, and the OpenAI-compatible chat API
+that Groq, OpenRouter, GitHub Models, OpenAI, Ollama and many others support. So swapping the
+model = editing lines in .env (LLM_PROVIDER, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL). No code change.
 
 Every answer is saved to outputs/raw_llm/<name>.json. If that file already exists, the saved
 answer is reused instead of calling the API again (unless you run with --fresh). This means a
@@ -43,12 +42,19 @@ def load_env(path=".env"):
 
 
 def settings():
+    """
+    LLM_PROVIDER = "gemini" -> Google's native Gemini API (works with every AI Studio key type)
+    LLM_PROVIDER = "openai" -> any OpenAI-compatible API (Groq, OpenRouter, GitHub Models, OpenAI, Ollama...)
+    """
     load_env()
-    base = os.environ.get("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai").rstrip("/")
+    provider = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+    default_base = ("https://generativelanguage.googleapis.com/v1beta" if provider == "gemini"
+                    else "https://api.openai.com/v1")
     return {
-        "base_url": base,
+        "provider": provider,
+        "base_url": os.environ.get("LLM_BASE_URL", default_base).rstrip("/"),
         "api_key": os.environ.get("LLM_API_KEY", ""),
-        "model": os.environ.get("LLM_MODEL", "gemini-2.5-flash"),
+        "model": os.environ.get("LLM_MODEL", "gemini-flash-latest"),
     }
 
 
@@ -68,8 +74,50 @@ def extract_json(text):
     return json.loads(text[start:end + 1])
 
 
+def _build_request(s, messages):
+    """Same question, two API dialects. Returns (url, headers, body)."""
+    if s["provider"] == "gemini":
+        system = "\n".join(m["content"] for m in messages if m["role"] == "system")
+        contents = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+                    for m in messages if m["role"] != "system"]
+        gen = {"temperature": config.TEMPERATURE}
+        if _state["json_mode"]:
+            gen["responseMimeType"] = "application/json"
+        body = {"contents": contents, "generationConfig": gen,
+                # the scripts are fiction with slaps, threats and poison plots: only block truly harmful text
+                "safetySettings": [{"category": c, "threshold": "BLOCK_ONLY_HIGH"} for c in
+                                   ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+                                    "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]}
+        if system:
+            body["systemInstruction"] = {"parts": [{"text": system}]}
+        url = f"{s['base_url']}/models/{s['model']}:generateContent"
+        return url, {"x-goog-api-key": s["api_key"], "Content-Type": "application/json"}, body
+
+    body = {"model": s["model"], "messages": messages, "temperature": config.TEMPERATURE}
+    if _state["json_mode"]:
+        body["response_format"] = {"type": "json_object"}
+    return (f"{s['base_url']}/chat/completions",
+            {"Authorization": f"Bearer {s['api_key']}", "Content-Type": "application/json"}, body)
+
+
+def _read_response(s, data):
+    """Pull the answer text and token counts out of either dialect."""
+    if s["provider"] == "gemini":
+        cands = data.get("candidates") or []
+        parts = (cands[0].get("content") or {}).get("parts", []) if cands else []
+        text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+        if not text:
+            reason = cands[0].get("finishReason") if cands else data.get("promptFeedback", {}).get("blockReason")
+            print(f"    empty answer from Gemini (reason: {reason})")
+        um = data.get("usageMetadata", {})
+        usage = {"prompt_tokens": um.get("promptTokenCount", 0),
+                 "completion_tokens": um.get("candidatesTokenCount", 0) + um.get("thoughtsTokenCount", 0)}
+        return text, usage
+    return data["choices"][0]["message"]["content"] or "", data.get("usage", {}) or {}
+
+
 def _post(messages):
-    """One HTTP request to the chat API, with waiting + retrying on rate limits."""
+    """One request to the model API, with waiting + retrying on rate limits."""
     s = settings()
     if not s["api_key"]:
         raise SystemExit("LLM_API_KEY is not set. Copy .env.example to .env and put your key in it.")
@@ -79,31 +127,26 @@ def _post(messages):
     if wait > 0:
         time.sleep(wait)
 
-    body = {"model": s["model"], "messages": messages, "temperature": config.TEMPERATURE}
-    if _state["json_mode"]:
-        body["response_format"] = {"type": "json_object"}
-    headers = {"Authorization": f"Bearer {s['api_key']}", "Content-Type": "application/json"}
-
+    url, headers, body = _build_request(s, messages)
     for attempt, pause in enumerate([0] + config.RETRY_WAITS):
         if pause:
             print(f"    waiting {pause}s before retry...")
             time.sleep(pause)
         try:
-            r = requests.post(f"{s['base_url']}/chat/completions", json=body, headers=headers, timeout=180)
+            r = requests.post(url, json=body, headers=headers, timeout=300)
         except requests.RequestException as e:
             print(f"    network error: {e}")
             continue
         _state["last_call"] = time.time()
 
         if r.status_code == 200:
-            data = r.json()
-            return data["choices"][0]["message"]["content"] or "", data.get("usage", {}) or {}, s["model"]
+            text, usage = _read_response(s, r.json())
+            return text, usage, s["model"]
 
         # Some providers don't support JSON mode -> switch it off and retry immediately.
-        if r.status_code == 400 and _state["json_mode"] and "response_format" in r.text:
+        if r.status_code == 400 and _state["json_mode"] and re.search(r"response_format|responseMimeType", r.text):
             print("    provider does not support JSON mode, retrying without it")
             _state["json_mode"] = False
-            body.pop("response_format", None)
             return _post(messages)
 
         if r.status_code == 429 and re.search(r"per ?day|PerDay|daily", r.text, re.IGNORECASE) and attempt >= 1:
@@ -143,8 +186,9 @@ def ask(name, system, user):
             break
         except (ValueError, json.JSONDecodeError) as e:
             print(f"    {name}: answer was not valid JSON ({e}); asking once more")
-            messages = messages + [{"role": "assistant", "content": text},
-                                   {"role": "user", "content": "That was not valid JSON. Reply again with ONLY the JSON object."}]
+            if text.strip():  # show the model its broken answer; if it was empty, just ask again
+                messages = messages + [{"role": "assistant", "content": text},
+                                       {"role": "user", "content": "That was not valid JSON. Reply again with ONLY the JSON object."}]
 
     record["parsed_ok"], record["parsed"] = ok, parsed
     # Note: we save the model's answer, not the prompt, because the prompt contains the

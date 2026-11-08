@@ -384,6 +384,8 @@ def main():
              "tokens_out": total.tokens_out / n_eps * scale_eps, "cost_usd": total.cost_usd / n_eps * scale_eps}]
         cost = pd.DataFrame(cost_rows)
         cost.to_csv(out / "cost.csv", index=False)
+        models = usage.groupby("model").size()
+        lines += ["Models that answered: " + ", ".join(f"{m} ({n} calls)" for m, n in models.items()), ""]
         lines += [f"COST (assumed price ${config.PRICE_IN_PER_M}/M input, ${config.PRICE_OUT_PER_M}/M output tokens; "
                   "the free tier actually cost $0)", cost.round(4).to_string(index=False), ""]
     lines += ["TOP 10"] + [f"  #{p['rank']:<2} {p['promo_id']} {segs_to_text(p['segs']):<40} "
