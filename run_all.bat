@@ -23,9 +23,9 @@ echo.
 echo === Checking your key and model (1 request) ===
 "%PY%" check_setup.py
 echo.
-echo If the test call above WORKED: press any key to start the full run (about 10-20 minutes).
-echo If it FAILED: close this window, fix .env (key or LLM_MODEL), and double-click again.
-pause >nul
+echo If the test call above FAILED, close this window, fix .env (key or LLM_MODEL), and run again.
+echo Starting the full run in 10 seconds (about 10-20 minutes)...
+timeout /t 10 >nul
 
 echo.
 echo === Full run on all 50 episodes ===

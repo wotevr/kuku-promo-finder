@@ -22,7 +22,7 @@ DUPLICATE_OVERLAP = 0.5         # two promos sharing >= 50% of their time are du
 HOOK_WINDOW_SECONDS = 3.0       # the hook must happen in the first 3 seconds
 
 # ---------- STEP 4: JUDGE ----------
-CLIPS_PER_JUDGE_CALL = 8        # judge several clips per call to save requests
+CLIPS_PER_JUDGE_CALL = 12       # judge several clips per call to save requests (free tier: ~20 requests/day per model)
 
 # ---------- STEP 5: RANK ----------
 # final score = weighted sum of the three 1-5 scores, minus penalties.

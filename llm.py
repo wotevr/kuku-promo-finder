@@ -54,7 +54,7 @@ def settings():
         "provider": provider,
         "base_url": os.environ.get("LLM_BASE_URL", default_base).rstrip("/"),
         "api_key": os.environ.get("LLM_API_KEY", ""),
-        "model": os.environ.get("LLM_MODEL", "gemini-flash-latest"),
+        "model": os.environ.get("LLM_MODEL", "gemini-3.6-flash"),
     }
 
 

@@ -106,6 +106,9 @@ def parse_episode(path: Path):
             current["end"] = to_seconds(timing.group("e"))
             continue
 
+        # Section labels between scenes are not part of any line.
+        if line == "Actions and dialogue:":
+            continue
         # Any other non-empty line is the text of the current block.
         if line and current is not None and not line.startswith("---") and not line.startswith("Scene "):
             current["text"] = (current["text"] + " " + line.strip('"')).strip()

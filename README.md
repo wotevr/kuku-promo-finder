@@ -49,6 +49,8 @@ python run.py --input ./data --out outputs/                     # full show, ~30
   runs out), run the same command again: saved answers are reused and it continues where it stopped.
   You can also switch to another model/provider in `.env` and continue. `--fresh` ignores saved answers.
 * All settings (window size, weights, penalties, lengths, prices) are in `config.py`.
+* Free-tier models are sometimes overloaded. `python speed_test.py gemini-3.6-flash gemini-flash-latest ...`
+  times one tiny request per model so you can pick a responsive one.
 * **Swapping the model:** change the lines in `.env`. `LLM_PROVIDER=gemini` uses Google's native
   Gemini API; `LLM_PROVIDER=openai` works with any OpenAI-compatible API (Groq, OpenRouter, GitHub
   Models, OpenAI, a local Ollama...). Only `llm.py` talks to the model, so nothing else changes.
