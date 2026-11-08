@@ -201,7 +201,9 @@ def _post(messages):
             r = requests.post(url, json=body, headers=headers,
                               timeout=120 if os.environ.get("LLM_FALLBACK_MODELS") else 300)
         except requests.RequestException as e:
-            print(f"    network error: {e}")
+            print(f"    network error: {str(e)[:120]}")
+            if os.environ.get("LLM_FALLBACK_MODELS") and isinstance(e, requests.Timeout):
+                raise QuotaExhausted("too slow right now (timed out)")  # try the next model instead of waiting again
             continue
         _state["last_call"] = time.time()
 
@@ -225,7 +227,8 @@ def _post(messages):
                 r"max_len|context.?length|context window|maximum context|too many tokens|too long|reduce the length|tokens? but",
                 r.text, re.IGNORECASE):
             raise ContextTooLong(r.text[:200])
-        if r.status_code == 429 and re.search(r"per ?day|PerDay|daily", r.text, re.IGNORECASE) and attempt >= 1:
+        if r.status_code == 429 and re.search(r"per ?day|PerDay|daily", r.text, re.IGNORECASE) and (
+                attempt >= 1 or os.environ.get("LLM_FALLBACK_MODELS")):  # daily limit: no point waiting, switch now
             raise QuotaExhausted(r.text[:300])
         if r.status_code == 404 and os.environ.get("LLM_FALLBACK_MODELS"):
             raise QuotaExhausted(f"model not found: {r.text[:120]}")
