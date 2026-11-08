@@ -41,6 +41,8 @@ RULES FOR TIMESTAMPS (very important)
   Use more than one segment only when it really helps (e.g. the cliffhanger at the end of one episode
   + the shocking opening of the next, or a hook line joined to the payoff a little later).
 - The TOTAL length of all segments must be between {min_s:.0f} and {max_s:.0f} seconds (aim for 25-45).
+  Before answering, add up (end - start) of every segment: a 2-3 second segment adds very little, so most promos
+  should be one or two long continuous stretches.
 - Look especially at episode endings: they are written as cliffhangers.
 
 Find up to {max_promos} DIFFERENT promos in the episodes below (different moments, not small variations).

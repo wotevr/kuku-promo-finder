@@ -16,6 +16,8 @@ INCLUDE_CAMERA_LINES = False  # camera directions double the tokens and add litt
 # ---------- STEP 3: CHECK ----------
 MIN_PROMO_SECONDS = 20.0        # from the brief: promos are 20-60 seconds
 MAX_PROMO_SECONDS = 60.0
+MIN_SECONDS_TO_FIX = 10.0       # a 10-20 s pick is lengthened by whole lines to reach 20 s (below 10 s: rejected)
+MAX_SECONDS_TO_FIX = 75.0       # a 60-75 s pick is trimmed at a line boundary (above 75 s: rejected)
 MAX_SEGMENTS = 3                # a promo may join at most 3 moments
 TIMESTAMP_TOLERANCE = 1.0       # LLM time must be within 1 s of a real line time, else "invented"
 DUPLICATE_OVERLAP = 0.5         # two promos sharing >= 50% of their time are duplicates

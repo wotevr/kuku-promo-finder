@@ -89,11 +89,72 @@ def check_candidate(cand, window_eps, lines_df, durations):
             return None, "segments out of order or overlapping"
 
     total = sum(s["end"] - s["start"] for s in clean)
+    if config.MIN_SECONDS_TO_FIX <= total < config.MIN_PROMO_SECONDS:
+        clean = _lengthen(clean, lines_df, durations)
+    elif config.MAX_PROMO_SECONDS < total <= config.MAX_SECONDS_TO_FIX:
+        clean = _shorten(clean, lines_df)
+    total = sum(s["end"] - s["start"] for s in clean)
     if total < config.MIN_PROMO_SECONDS:
         return None, f"too short ({total:.1f}s)"
     if total > config.MAX_PROMO_SECONDS:
         return None, f"too long ({total:.1f}s)"
     return clean, None
+
+
+def _total(segs):
+    return sum(s["end"] - s["start"] for s in segs)
+
+
+def _lengthen(clean, lines_df, durations):
+    """
+    A clip that is a little short (models often pick 13-19 s) is extended by whole lines instead of being thrown
+    away: first the last segment runs on into the next lines (the reaction / cliffhanger usually follows), then, if
+    still short, the first segment starts a few lines earlier. Never crosses another segment or the episode end,
+    never goes over the maximum length, and never cuts a line in half.
+    """
+    clean = [dict(s) for s in clean]
+    target = config.MIN_PROMO_SECONDS
+    last, first = clean[-1], clean[0]
+    ep_lines = lines_df[lines_df.episode == last["episode"]]
+    for end in sorted(set(ep_lines.end)):
+        if _total(clean) >= target:
+            break
+        if end <= last["end"] or end > durations[last["episode"]] + 0.5:
+            continue
+        if _total(clean) + (end - last["end"]) > config.MAX_PROMO_SECONDS:
+            break
+        last["snapped_by"] = round(last["snapped_by"] + end - last["end"], 2)
+        last["end"] = round(end, 2)
+    ep_lines = lines_df[lines_df.episode == first["episode"]]
+    floor = 0.0
+    for start in sorted(set(ep_lines.start), reverse=True):
+        if _total(clean) >= target:
+            break
+        if start >= first["start"] or start < floor:
+            continue
+        if _total(clean) + (first["start"] - start) > config.MAX_PROMO_SECONDS:
+            break
+        first["snapped_by"] = round(first["snapped_by"] + first["start"] - start, 2)
+        first["start"] = round(start, 2)
+    # keep whole lines after moving the cut points
+    for seg in clean:
+        seg["start"], seg["end"] = snap(seg["start"], seg["end"], _dialogue_spans(lines_df, seg["episode"]))
+    return clean
+
+
+def _shorten(clean, lines_df):
+    """A clip a little over the maximum is trimmed from the end of its last segment, at line boundaries."""
+    clean = [dict(s) for s in clean]
+    last = clean[-1]
+    spans = _dialogue_spans(lines_df, last["episode"])
+    ends = sorted(set(lines_df[lines_df.episode == last["episode"]].end), reverse=True)
+    for end in ends:
+        if _total(clean) <= config.MAX_PROMO_SECONDS:
+            break
+        if last["start"] < end < last["end"] and not any(a < end < b for a, b in spans):
+            last["snapped_by"] = round(last["snapped_by"] + last["end"] - end, 2)
+            last["end"] = round(end, 2)
+    return clean
 
 
 def overlap_share(segs_a, segs_b):
