@@ -15,10 +15,44 @@ import zipfile
 from pathlib import Path
 
 import pandas as pd
+import re
+import requests
 import streamlit as st
 
 HERE = Path(__file__).resolve().parent
 GEMINI_CHAIN = "gemini-3.6-flash,gemini-3.5-flash,gemini-3.7-flash,gemini-flash-lite-latest,gemini-3.5-flash-lite,gemini-flash-latest,gemini-3.8-flash"
+
+
+def _norm(name):
+    return re.sub(r"[^a-z0-9]", "", name.lower().split("/")[-1].replace("models/", ""))
+
+
+def resolve_model(provider, base_url, key, typed):
+    """
+    Turn what the user typed ("Llama 3.3 70B") into the provider's exact model ID
+    ("meta-llama/llama-3.3-70b-instruct"). Returns (model_id, note). If the list can't be fetched, keep the typed name.
+    """
+    typed = typed.strip()
+    try:
+        if provider == "gemini":
+            r = requests.get(f"{base_url.rstrip('/')}/models", headers={"x-goog-api-key": key},
+                             params={"pageSize": 300}, timeout=15)
+            ids = [m["name"].replace("models/", "") for m in r.json().get("models", [])
+                   if "generateContent" in m.get("supportedGenerationMethods", [])]
+        else:
+            r = requests.get(f"{base_url.rstrip('/')}/models", headers={"Authorization": f"Bearer {key}"}, timeout=15)
+            ids = [m.get("id", "") for m in r.json().get("data", [])]
+    except Exception:
+        return typed, ""
+    if not ids or typed in ids:
+        return typed, ""
+    want = _norm(typed)
+    matches = [i for i in ids if want and want in _norm(i)] or [i for i in ids if _norm(i) and _norm(i) in want]
+    if not matches:
+        return typed, f"'{typed}' is not a model ID this provider knows. Example IDs: " + ", ".join(ids[:8])
+    # prefer the normal (non-":free") variant unless ":free" was typed, then the shortest (most basic) ID
+    best = sorted(matches, key=lambda i: ((":free" in i) != (":free" in typed), len(i)))[0]
+    return best, f"Using model ID **{best}** for '{typed}'."
 
 
 def demo_key():
@@ -69,19 +103,25 @@ with col2:
     provider, default_url, default_model = PRESETS[preset]
     model = st.text_input("Model name", value=default_model, key=f"model_{preset}",
                           help="Type the exact model name the provider gives you.")
-    has_demo = provider == "gemini" and bool(demo_key())
-    key = st.text_input("API key" + (" (optional: leave empty to use the built-in free key)" if has_demo else ""),
+    has_demo = bool(demo_key())
+    key = st.text_input("API key" + (" (optional: leave empty to use the built-in free Gemini key)" if has_demo else ""),
                         type="password", help="Free Gemini key: https://aistudio.google.com/apikey")
     auto_switch = provider == "gemini" and st.checkbox(
         "If this model is busy or out of quota, automatically try other Gemini models", value=True)
     base_url = st.text_input("Base URL (filled in for you)", value=default_url, key=f"url_{preset}")
 
-use_key = key.strip() or (demo_key() if provider == "gemini" else "")
+using_builtin = not key.strip() and bool(demo_key())
+if using_builtin:  # no key typed: always use the built-in free Gemini key and model, whatever is selected above
+    provider, base_url = "gemini", "https://generativelanguage.googleapis.com/v1beta"
+    if not model.strip().startswith("gemini"):
+        model = "gemini-3.6-flash"
+    auto_switch = True
+use_key = key.strip() or (demo_key() if using_builtin else "")
 run = st.button("Find promos", type="primary", disabled=not (uploads and use_key and model and base_url))
 if not (uploads and use_key and model and base_url):
     st.info("Upload the episode files (or the .zip) to start." + ("" if use_key else " Then paste an API key."))
-elif not key.strip():
-    st.caption("API key left empty: the built-in free Gemini key will be used. It has a small free daily quota "
+elif using_builtin:
+    st.caption("API key left empty: the built-in free Gemini key and model will be used (the provider choice above is ignored). It has a small free daily quota "
                "(it resets every day). If that quota is used up, paste your own key above and run again.")
 
 
@@ -113,6 +153,10 @@ if run:
         st.stop()
     st.write(f"Saved {n} episode files. Running...")
 
+    model_id, note = resolve_model(provider, base_url, use_key, model)
+    if note:
+        (st.info if model_id != model.strip() else st.warning)(note)
+    model = model_id
     env = {**os.environ, "LLM_PROVIDER": provider, "LLM_API_KEY": use_key, "LLM_MODEL": model.strip(),
            "LLM_BASE_URL": base_url.strip(), "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1",
            "SECONDS_BETWEEN_CALLS": "0" if paid else "7"}
@@ -157,8 +201,11 @@ if "out" in st.session_state:
                      "or any provider from the list) and click Find promos again.")
         elif "401" in log or "403" in log or "API key" in log:
             st.error("The API key was rejected. Check the key and that it belongs to the chosen provider.")
-        elif "404" in log:
-            st.error("Model not found. Check the exact model name for this provider.")
+        elif "404" in log or ("model" in log.lower() and ("not a valid" in log.lower() or "not found" in log.lower()
+                                                            or "does not exist" in log.lower())):
+            st.error("The provider did not accept this model name. Type the exact model ID from the provider's "
+                     "model list (for OpenRouter e.g. meta-llama/llama-3.3-70b-instruct), or leave the API key "
+                     "empty to use the built-in Gemini model.")
         else:
             st.error("The run did not finish. See the log below.")
         st.code(st.session_state["log"][-4000:])
