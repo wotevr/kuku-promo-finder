@@ -18,6 +18,15 @@ import pandas as pd
 import streamlit as st
 
 HERE = Path(__file__).resolve().parent
+GEMINI_CHAIN = "gemini-3.6-flash,gemini-3.5-flash,gemini-3.7-flash,gemini-3.8-flash,gemini-flash-latest,gemini-flash-lite-latest"
+
+
+def demo_key():
+    """Built-in free Gemini key, stored as a Streamlit secret (never shown to visitors)."""
+    try:
+        return st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:  # no secrets file (e.g. running locally)
+        return os.environ.get("GEMINI_API_KEY", "")
 
 st.set_page_config(page_title="Kuku Promo Finder", page_icon="🎬", layout="wide")
 st.title("🎬 Kuku Promo Finder")
@@ -60,12 +69,19 @@ with col2:
     provider, default_url, default_model = PRESETS[preset]
     model = st.text_input("Model name", value=default_model, key=f"model_{preset}",
                           help="Type the exact model name the provider gives you.")
-    key = st.text_input("API key", type="password", help="Free Gemini key: https://aistudio.google.com/apikey")
+    has_demo = provider == "gemini" and bool(demo_key())
+    key = st.text_input("API key" + (" (optional: leave empty to use the built-in free key)" if has_demo else ""),
+                        type="password", help="Free Gemini key: https://aistudio.google.com/apikey")
+    auto_switch = provider == "gemini" and st.checkbox(
+        "If this model is busy or out of quota, automatically try other Gemini models", value=True)
     base_url = st.text_input("Base URL (filled in for you)", value=default_url, key=f"url_{preset}")
 
-run = st.button("Find promos", type="primary", disabled=not (uploads and key and model and base_url))
-if not (uploads and key and model and base_url):
-    st.info("Upload the episode files, choose a provider and paste an API key to start.")
+use_key = key.strip() or (demo_key() if provider == "gemini" else "")
+run = st.button("Find promos", type="primary", disabled=not (uploads and use_key and model and base_url))
+if not (uploads and use_key and model and base_url):
+    st.info("Upload the episode files (or the .zip) to start." + ("" if use_key else " Then paste an API key."))
+elif not key.strip():
+    st.caption("Using the built-in free Gemini key (limited daily quota). Paste your own key for heavy use.")
 
 
 def save_uploads(files, folder):
@@ -96,9 +112,12 @@ if run:
         st.stop()
     st.write(f"Saved {n} episode files. Running...")
 
-    env = {**os.environ, "LLM_PROVIDER": provider, "LLM_API_KEY": key.strip(), "LLM_MODEL": model.strip(),
+    env = {**os.environ, "LLM_PROVIDER": provider, "LLM_API_KEY": use_key, "LLM_MODEL": model.strip(),
            "LLM_BASE_URL": base_url.strip(), "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1",
            "SECONDS_BETWEEN_CALLS": "0" if paid else "7"}
+    if auto_switch:  # try the chosen model first, then the others (each Gemini model has its own free quota)
+        chain = [model.strip()] + [m for m in GEMINI_CHAIN.split(",") if m != model.strip()]
+        env.update({"LLM_FALLBACK_MODELS": ",".join(chain), "RETRY_WAITS": "8,15"})
     cmd = [sys.executable, str(HERE / "run.py"), "--input", str(data), "--out", str(out)]
     if episodes.strip():
         cmd += ["--episodes", episodes.strip()]

@@ -29,6 +29,25 @@ class QuotaExhausted(Exception):
     pass
 
 
+def _post_with_fallback(messages):
+    """
+    Like _post, but if the model is out of quota / overloaded / not found, switch to the next model in
+    LLM_FALLBACK_MODELS (comma-separated) and try again. Free tiers give each model its own daily quota.
+    """
+    while True:
+        try:
+            return _post(messages)
+        except QuotaExhausted as e:
+            current = settings()["model"]
+            _state.setdefault("tried_models", set()).add(current)
+            chain = [m.strip() for m in os.environ.get("LLM_FALLBACK_MODELS", "").split(",") if m.strip()]
+            remaining = [m for m in chain if m not in _state["tried_models"]]
+            if not remaining:
+                raise
+            print(f"    {current} is unavailable right now ({str(e)[:60]}...); switching to {remaining[0]}")
+            os.environ["LLM_MODEL"] = remaining[0]
+
+
 def load_env(path=".env"):
     """Tiny .env reader (KEY=value lines), so we don't need an extra package."""
     p = Path(path)
@@ -159,6 +178,8 @@ def _post(messages):
 
         if r.status_code == 429 and re.search(r"per ?day|PerDay|daily", r.text, re.IGNORECASE) and attempt >= 1:
             raise QuotaExhausted(r.text[:300])
+        if r.status_code == 404 and os.environ.get("LLM_FALLBACK_MODELS"):
+            raise QuotaExhausted(f"model not found: {r.text[:120]}")
         if r.status_code in (429, 500, 502, 503, 504):
             print(f"    HTTP {r.status_code} (rate limit or server busy)")
             continue
@@ -185,7 +206,7 @@ def ask(name, system, user):
     parsed, ok = None, False
 
     for attempt in range(2):  # first try + one retry if the JSON is broken
-        text, usage, model = _post(messages)
+        text, usage, model = _post_with_fallback(messages)
         _state["calls_made"] += 1
         record["model"] = model
         record["attempts"].append({"response_text": text, "usage": usage})
