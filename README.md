@@ -8,8 +8,8 @@ the cliffhanger, one line on why it works, and a ranked posting order.
 It does **not** train a model. It calls an existing LLM through an API for the judgement calls, and
 uses plain Python for everything that must be exact (timestamps, lengths, duplicates).
 
-**Web app:** [the live app on Streamlit](STREAMLIT_LINK) - upload the episode files, paste a free Gemini
-key, click "Find promos". It runs the same pipeline as below. (Run it locally with `streamlit run app.py`.)
+**Optional web page:** `streamlit run app.py` opens a local page where you upload the episode files, paste a
+key and click "Find promos" (same pipeline as below).
 
 ## How it works (5 steps)
 
