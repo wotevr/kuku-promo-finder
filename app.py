@@ -63,13 +63,40 @@ def demo_key():
         return os.environ.get("GEMINI_API_KEY", "")
 
 st.set_page_config(page_title="Kuku Promo Finder", page_icon="🎬", layout="wide")
-st.title("🎬 Kuku Promo Finder")
-st.write(
-    "Finds the best **20-60 second promo clips** in a microdrama screenplay: clips that open on a hook in the "
-    "first 3 seconds, end on a cliffhanger, and make sense to someone who has never seen the show. "
-    "For each promo you get the episode(s), exact start/end times, the hook, the cliffhanger, scores and a ranked "
-    "posting order. Code: [github.com/wotevr/kuku-promo-finder](https://github.com/wotevr/kuku-promo-finder)"
-)
+st.markdown("""
+<style>
+.block-container {padding-top: 3.5rem; max-width: 1200px;}
+.hero {background: linear-gradient(135deg, #ff4b5c 0%, #c2185b 55%, #6a1b9a 100%);
+       border-radius: 18px; padding: 28px 32px; margin-bottom: 18px; color: #fff;
+       box-shadow: 0 10px 30px rgba(194, 24, 91, 0.25);}
+.hero h1 {color: #fff; font-size: 2.3rem; margin: 0 0 6px 0; padding: 0; font-weight: 800;}
+.hero p {color: rgba(255,255,255,0.92); font-size: 1.02rem; margin: 0 0 14px 0; line-height: 1.5;}
+.hero a {color: #fff; text-decoration: underline;}
+.pills {display: flex; flex-wrap: wrap; gap: 8px;}
+.pill {background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.35);
+       border-radius: 999px; padding: 4px 12px; font-size: 0.85rem; color: #fff;}
+div[data-testid="stExpander"] {border-radius: 12px;}
+div[data-testid="stFileUploader"] section {border-radius: 12px;}
+div.stButton > button[kind="primary"] {border-radius: 10px; padding: 0.55rem 1.6rem; font-weight: 700;
+       background: linear-gradient(135deg, #ff4b5c, #c2185b); border: none;
+       box-shadow: 0 4px 14px rgba(255, 75, 92, 0.35);}
+div.stButton > button[kind="primary"]:hover {filter: brightness(1.08);}
+div[data-testid="stDownloadButton"] > button {border-radius: 10px;}
+div[data-testid="stCodeBlock"] pre, .stCode {border-radius: 12px;}
+</style>
+<div class="hero">
+  <h1>🎬 Kuku Promo Finder</h1>
+  <p>Finds the best <b>20-60 second promo clips</b> in a microdrama screenplay: clips that open on a hook in the
+  first 3 seconds, end on a cliffhanger, and make sense to someone who has never seen the show. For each promo you
+  get the episode(s), exact start/end times, the hook, the cliffhanger, scores and a ranked posting order.
+  Code: <a href="https://github.com/wotevr/kuku-promo-finder" target="_blank">github.com/wotevr/kuku-promo-finder</a></p>
+  <div class="pills">
+    <span class="pill">⏱️ 20-60 s clips</span><span class="pill">🪝 Hook in first 3 s</span>
+    <span class="pill">🔚 Cliffhanger ending</span><span class="pill">✅ Timestamps checked by code</span>
+    <span class="pill">🔁 Works with any LLM</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 st.caption("Your files and API key are used only for this run and are not stored.")
 
 with st.expander("How it works", expanded=False):
