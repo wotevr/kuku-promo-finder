@@ -1,0 +1,142 @@
+"""
+Web version of the promo finder (Streamlit). It runs the same run.py pipeline.
+
+    streamlit run app.py
+
+Nothing is stored: the uploaded scripts and the API key live only in this session's temporary folder.
+"""
+
+import io
+import os
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+HERE = Path(__file__).resolve().parent
+
+st.set_page_config(page_title="Kuku Promo Finder", page_icon="🎬", layout="wide")
+st.title("🎬 Kuku Promo Finder")
+st.write(
+    "Finds the best **20-60 second promo clips** in a microdrama screenplay: clips that open on a hook in the "
+    "first 3 seconds, end on a cliffhanger, and make sense to someone who has never seen the show. "
+    "For each promo you get the episode(s), exact start/end times, the hook, the cliffhanger, scores and a ranked "
+    "posting order. Code: [github.com/wotevr/kuku-promo-finder](https://github.com/wotevr/kuku-promo-finder)"
+)
+st.caption("Your files and API key are used only for this run and are not stored.")
+
+with st.expander("How it works", expanded=False):
+    st.markdown(
+        "1. **Read** (code): parse every episode into timed lines\n"
+        "2. **Find** (LLM): read 4 episodes at a time, propose promos with timestamps\n"
+        "3. **Check** (code): reject invented times / wrong length, never cut a line in half, remove duplicates\n"
+        "4. **Judge** (LLM): a 'cold viewer' sees only the clip and scores hook, cliffhanger, makes-sense-alone\n"
+        "5. **Rank** (code): score formula + variety rule, then one line on why each top clip should be posted"
+    )
+
+col1, col2 = st.columns(2)
+with col1:
+    uploads = st.file_uploader(
+        "1. Upload the episode screenplays (the episode-XXX-*.txt files, or one .zip of them)",
+        type=["txt", "zip"], accept_multiple_files=True)
+    episodes = st.text_input("Episodes to run (optional, e.g. 1-4). Leave empty for all.", value="1-4")
+with col2:
+    provider = st.selectbox("2. Model provider", ["gemini", "openai"],
+                            help="gemini = Google AI Studio key. openai = any OpenAI-compatible API "
+                                 "(Groq, OpenRouter, OpenAI...).")
+    key = st.text_input("API key", type="password",
+                        help="Free Gemini key: https://aistudio.google.com/apikey")
+    model = st.text_input("Model", value="gemini-3.6-flash" if provider == "gemini" else "")
+    base_url = st.text_input(
+        "Base URL",
+        value="https://generativelanguage.googleapis.com/v1beta" if provider == "gemini" else "https://api.openai.com/v1")
+
+run = st.button("Find promos", type="primary", disabled=not (uploads and key and model))
+if not (uploads and key and model):
+    st.info("Upload the episode files and enter an API key to start. A 4-episode test takes about 1-2 minutes "
+            "on a free key; all 50 episodes about 20-30 minutes.")
+
+
+def save_uploads(files, folder):
+    """Save .txt files (and the .txt files inside any .zip) into folder. Returns how many were saved."""
+    n = 0
+    for f in files:
+        data = f.getvalue()
+        if f.name.lower().endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                for member in z.namelist():
+                    name = Path(member).name  # drop any folder path from the zip
+                    if name.lower().endswith(".txt") and name.lower().startswith("episode-"):
+                        (folder / name).write_bytes(z.read(member))
+                        n += 1
+        elif f.name.lower().startswith("episode-"):
+            (folder / Path(f.name).name).write_bytes(data)
+            n += 1
+    return n
+
+
+if run:
+    tmp = Path(tempfile.mkdtemp(prefix="kuku_"))
+    data, out = tmp / "data", tmp / "out"
+    data.mkdir()
+    n = save_uploads(uploads, data)
+    if n == 0:
+        st.error("No episode-XXX-*.txt files found in the upload.")
+        st.stop()
+    st.write(f"Saved {n} episode files. Running...")
+
+    env = {**os.environ, "LLM_PROVIDER": provider, "LLM_API_KEY": key, "LLM_MODEL": model.strip(),
+           "LLM_BASE_URL": base_url.strip(), "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"}
+    cmd = [sys.executable, str(HERE / "run.py"), "--input", str(data), "--out", str(out)]
+    if episodes.strip():
+        cmd += ["--episodes", episodes.strip()]
+
+    log_box = st.empty()
+    lines = []
+    with st.spinner("Finding promos (the free tier waits a few seconds between calls)..."):
+        proc = subprocess.Popen(cmd, cwd=tmp, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            lines.append(line.rstrip())
+            log_box.code("\n".join(lines[-25:]))
+        proc.wait()
+    st.session_state["out"] = str(out)
+    st.session_state["log"] = "\n".join(lines)
+
+if "out" in st.session_state:
+    out = Path(st.session_state["out"])
+    if not (out / "promos.json").exists():
+        st.error("The run did not finish. See the log below (quota or a wrong key/model are the usual reasons).")
+        st.code(st.session_state["log"][-4000:])
+        st.stop()
+
+    promos = pd.read_json(out / "promos.json")
+    funnel = pd.read_csv(out / "funnel.csv")
+    st.success(f"Done: {len(promos)} promos ranked.")
+
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        st.subheader("Funnel")
+        st.dataframe(funnel, hide_index=True, width="stretch")
+    with c2:
+        st.subheader("Top 10")
+        top = promos.head(10)[["rank", "segments_text", "duration", "final_score", "moment_type", "hook", "cliffhanger"]]
+        st.dataframe(top, hide_index=True, width="stretch")
+
+    st.subheader("Ranked promos (full detail)")
+    st.markdown((out / "ranked_promos.md").read_text(encoding="utf-8"))
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in out.rglob("*"):
+            if p.is_file():
+                z.write(p, p.relative_to(out))
+    d1, d2, d3 = st.columns(3)
+    d1.download_button("Download ranked_promos.md", (out / "ranked_promos.md").read_bytes(), "ranked_promos.md")
+    d2.download_button("Download promos.csv", (out / "promos.csv").read_bytes(), "promos.csv")
+    d3.download_button("Download all outputs (.zip)", buf.getvalue(), "promo_outputs.zip")
+    with st.expander("Run log"):
+        st.code(st.session_state["log"])
