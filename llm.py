@@ -161,7 +161,8 @@ def _post(messages):
             print(f"    waiting {pause}s before retry...")
             time.sleep(pause)
         try:
-            r = requests.post(url, json=body, headers=headers, timeout=300)
+            r = requests.post(url, json=body, headers=headers,
+                              timeout=120 if os.environ.get("LLM_FALLBACK_MODELS") else 300)
         except requests.RequestException as e:
             print(f"    network error: {e}")
             continue
