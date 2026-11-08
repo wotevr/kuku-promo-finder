@@ -135,12 +135,31 @@ def judge(promos, lines_df, batch_size=None):
         clips = answer.get("clips") if isinstance(answer, dict) else None
         if not isinstance(clips, list):  # some models use another key: take the first list in the answer
             clips = next((v for v in answer.values() if isinstance(v, list)), []) if isinstance(answer, dict) else []
+        matched = 0
         for c in clips:
             if not isinstance(c, dict):
                 continue
             m = re.search(r"P\d+", str(c.get("clip_id") or c.get("id") or c.get("clip") or ""))
             if m:
                 results[m.group()] = c
+                matched += 1
+        if not matched and len(clips) == len(batch):  # no ids in the answer: same order as asked
+            for p, c in zip(batch, clips):
+                if isinstance(c, dict):
+                    results[p["promo_id"]] = c
+        # anything missing or without readable scores: ask again for that clip on its own (once)
+        if len(batch) > 1:
+            for p in batch:
+                if not scores_ok(results.get(p["promo_id"])):
+                    print(f"    {p['promo_id']}: judge answer unclear ({str(results.get(p['promo_id']))[:150]}); asking again for this clip alone")
+                    one = ask(f"judge1_{p['promo_id']}", prompts.JUDGE_SYSTEM, prompts.JUDGE_USER.format(
+                        n=1, clips=f"### CLIP {p['promo_id']}\n{checks.clip_text(p['segs'], lines_df)}"))
+                    found = one.get("clips") if isinstance(one, dict) else None
+                    if not isinstance(found, list):
+                        found = next((v for v in one.values() if isinstance(v, list)), [one]) if isinstance(one, dict) else []
+                    cand = next((c for c in found if isinstance(c, dict)), None)
+                    if cand and scores_ok(cand):
+                        results[p["promo_id"]] = cand
         print(f"  judged {min(i + len(batch), len(promos))}/{len(promos)}")
     return results
 
@@ -165,14 +184,60 @@ SCORE_KEYS = {  # the names different models use for the same score
 }
 
 
+SCORE_WORDS = {  # fuzzy fallback: any key (at any depth) containing one of these words
+    "hook_strength": ["hook"],
+    "cliffhanger_strength": ["cliff"],
+    "makes_sense_alone": ["makessense", "sensealone", "standalone", "standsalone", "sense"],
+}
+
+
+def _norm_key(k):
+    return re.sub(r"[^a-z]", "", str(k).lower())
+
+
+def _walk(obj):
+    """Every (key, value) pair in a nested dict/list."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k, v
+            yield from _walk(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk(v)
+
+
 def find_score(verdict, name):
-    """Look for a score under any of its usual names, also inside a nested "scores" object."""
+    """
+    Look for a score under any of its usual names (also nested, any capitalisation: hookStrength, Hook Strength,
+    {"scores": {"hook": 4}}, {"reviewer": {"hook_strength": {"score": 4}}} ...).
+    """
+    if not isinstance(verdict, dict):
+        return np.nan
     places = [verdict] + [verdict[k] for k in ("scores", "score") if isinstance(verdict.get(k), dict)]
     for place in places:
         for key in SCORE_KEYS[name]:
-            if key in place:
-                return score_1_to_5(place[key])
+            if key in place and not isinstance(place[key], bool):
+                value = score_1_to_5(place[key])
+                if not np.isnan(value):
+                    return value
+    exact = {_norm_key(k) for k in SCORE_KEYS[name]}
+    pairs = [(_norm_key(k), v) for k, v in _walk(verdict) if not isinstance(v, (bool, list))]
+    for nk, v in pairs:
+        if nk in exact:
+            value = score_1_to_5(v)
+            if not np.isnan(value):
+                return value
+    for word in SCORE_WORDS[name]:
+        for nk, v in pairs:
+            if word in nk and "evidence" not in nk and "reason" not in nk and "understand" not in nk:
+                value = score_1_to_5(v)
+                if not np.isnan(value):
+                    return value
     return np.nan
+
+
+def scores_ok(verdict):
+    return bool(verdict) and not any(np.isnan(find_score(verdict, k)) for k in config.WEIGHTS)
 
 
 # ------------------------------------------------------------------ step 5: RANK
@@ -364,21 +429,19 @@ def main():
     verdicts = judge(unique, lines_df)
     judged = []
     for p in unique:
-        v = verdicts.get(p["promo_id"])
+        v = verdicts.get(p["promo_id"]) or {}
         if not v:
-            rejected.append({"promo_id": p["promo_id"], "window": p["window"], "stage": "judge",
-                             "reason": "judge returned no answer for this clip",
-                             "raw_segments": segs_to_text(p["segs"]), "hook": p["hook"]})
-            continue
+            print(f"    {p['promo_id']}: the judge gave no answer for this clip; kept with neutral scores")
         p.update({k: v.get(k, "") for k in ["who_are_they", "what_is_happening", "what_is_unresolved",
                                             "hook_evidence", "cliffhanger_evidence", "sense_evidence"]})
         for k in ["hook_strength", "cliffhanger_strength", "makes_sense_alone"]:
             p[k] = find_score(v, k)
-        if any(np.isnan(p[k]) for k in config.WEIGHTS):
-            rejected.append({"promo_id": p["promo_id"], "window": p["window"], "stage": "judge",
-                             "reason": "judge gave unreadable scores", "raw_segments": segs_to_text(p["segs"]),
-                             "hook": p["hook"]})
-            continue
+        unclear = [k for k in config.WEIGHTS if np.isnan(p[k])]
+        if unclear:  # keep the clip (it passed every check) with a neutral 3 for the score we could not read
+            print(f"    {p['promo_id']}: could not read {', '.join(unclear)} from the judge; using a neutral 3")
+            for k in unclear:
+                p[k] = 3.0
+            p["sense_evidence"] = (str(p.get("sense_evidence", "")) + " [judge score unclear: neutral 3 used]").strip()
         p["needs_setup"] = str(v.get("understands_alone", True)).lower() in ("false", "no", "0")
         judged.append(p)
 
