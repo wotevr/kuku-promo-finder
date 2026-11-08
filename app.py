@@ -166,6 +166,13 @@ if "out" in st.session_state:
 
     promos = pd.read_json(out / "promos.json")
     funnel = pd.read_csv(out / "funnel.csv")
+    proposed = int(funnel.loc[funnel.stage.str.startswith("candidates proposed"), "count"].sum()) if len(funnel) else 0
+    if promos.empty and proposed == 0:
+        st.warning("The model's answers could not be used (see the run log below). Click Find promos again - "
+                   "free models are sometimes busy - or choose another model or paste your own key.")
+        with st.expander("Run log", expanded=True):
+            st.code(st.session_state["log"][-5000:])
+        st.stop()
     if promos.empty:
         st.warning("The run finished, but no promo passed the checks (see the funnel and the rejection reasons "
                    "below). This usually means the model is too weak to follow the timestamp rules: try a stronger "

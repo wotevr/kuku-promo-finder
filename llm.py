@@ -84,13 +84,20 @@ def configure(out_dir, fresh=False):
 
 
 def extract_json(text):
-    """LLMs sometimes wrap JSON in ```json fences or add a sentence. Pull out the {...} part."""
-    text = text.strip()
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end == -1:
+    """
+    LLMs sometimes wrap JSON in ```json fences, add a sentence, return a bare list, or put extra text/objects
+    after the JSON. Take the first complete JSON value and ignore the rest.
+    """
+    text = re.sub(r"```(?:json)?", "", text.strip())
+    starts = [i for i in (text.find("{"), text.find("[")) if i != -1]
+    if not starts:
         raise ValueError("no JSON object found")
-    return json.loads(text[start:end + 1])
+    value, _ = json.JSONDecoder().raw_decode(text[min(starts):])
+    if isinstance(value, list):  # a bare list: make it fit whichever key the caller expects
+        return {"promos": value, "clips": value, "why": value}
+    if not isinstance(value, dict):
+        raise ValueError("JSON is not an object")
+    return value
 
 
 def _build_request(s, messages):
