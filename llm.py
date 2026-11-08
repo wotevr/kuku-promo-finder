@@ -81,6 +81,8 @@ def _build_request(s, messages):
         contents = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
                     for m in messages if m["role"] != "system"]
         gen = {"temperature": config.TEMPERATURE}
+        if _state.get("thinking", True) and os.environ.get("LLM_THINKING", "low") != "default":
+            gen["thinkingConfig"] = {"thinkingLevel": os.environ.get("LLM_THINKING", "low")}  # faster answers
         if _state["json_mode"]:
             gen["responseMimeType"] = "application/json"
         body = {"contents": contents, "generationConfig": gen,
@@ -142,6 +144,12 @@ def _post(messages):
         if r.status_code == 200:
             text, usage = _read_response(s, r.json())
             return text, usage, s["model"]
+
+        # Some models don't accept the "think less" setting -> drop it and retry immediately.
+        if r.status_code == 400 and _state.get("thinking", True) and re.search(r"thinking", r.text, re.IGNORECASE):
+            print("    model does not accept thinkingLevel, retrying without it")
+            _state["thinking"] = False
+            return _post(messages)
 
         # Some providers don't support JSON mode -> switch it off and retry immediately.
         if r.status_code == 400 and _state["json_mode"] and re.search(r"response_format|responseMimeType", r.text):

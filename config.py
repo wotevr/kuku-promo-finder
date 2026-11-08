@@ -36,7 +36,8 @@ SAME_MINUTE_SECONDS = 60.0      # diversity: no two top clips starting within 60
 
 # ---------- LLM call behaviour ----------
 TEMPERATURE = 0.4
-SECONDS_BETWEEN_CALLS = 7       # free tiers allow ~5-10 requests per minute
+import os
+SECONDS_BETWEEN_CALLS = float(os.environ.get("SECONDS_BETWEEN_CALLS", 7))  # free tiers allow ~5-10 requests/min; 0 for paid keys
 RETRY_WAITS = [15, 30, 60, 90]  # seconds to wait after a rate-limit / server error
 JSON_MODE = True                # ask the API for JSON output (turned off automatically if unsupported)
 

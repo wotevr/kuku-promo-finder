@@ -38,27 +38,34 @@ with st.expander("How it works", expanded=False):
         "5. **Rank** (code): score formula + variety rule, then one line on why each top clip should be posted"
     )
 
+PRESETS = {
+    "Google Gemini": ("gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-3.6-flash"),
+    "OpenAI (GPT)": ("openai", "https://api.openai.com/v1", ""),
+    "Anthropic (Claude)": ("openai", "https://api.anthropic.com/v1", "claude-sonnet-5-5"),
+    "Groq": ("openai", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+    "OpenRouter": ("openai", "https://openrouter.ai/api/v1", ""),
+    "Other (OpenAI-compatible)": ("openai", "", ""),
+}
+
 col1, col2 = st.columns(2)
 with col1:
     uploads = st.file_uploader(
         "1. Upload the episode screenplays (the episode-XXX-*.txt files, or one .zip of them)",
         type=["txt", "zip"], accept_multiple_files=True)
-    episodes = st.text_input("Episodes to run (optional, e.g. 1-4). Leave empty for all.", value="1-4")
+    episodes = st.text_input("Episodes to run (e.g. 1-4). Leave empty for all.", value="1-4",
+                             help="About 1 minute per 2 episodes on a free key. 1-4 is a good quick test.")
+    paid = st.checkbox("This is a paid / high-limit key (skip the free-tier waits between calls)")
 with col2:
-    provider = st.selectbox("2. Model provider", ["gemini", "openai"],
-                            help="gemini = Google AI Studio key. openai = any OpenAI-compatible API "
-                                 "(Groq, OpenRouter, OpenAI...).")
-    key = st.text_input("API key", type="password",
-                        help="Free Gemini key: https://aistudio.google.com/apikey")
-    model = st.text_input("Model", value="gemini-3.6-flash" if provider == "gemini" else "")
-    base_url = st.text_input(
-        "Base URL",
-        value="https://generativelanguage.googleapis.com/v1beta" if provider == "gemini" else "https://api.openai.com/v1")
+    preset = st.selectbox("2. Model provider", list(PRESETS))
+    provider, default_url, default_model = PRESETS[preset]
+    model = st.text_input("Model name", value=default_model, key=f"model_{preset}",
+                          help="Type the exact model name the provider gives you.")
+    key = st.text_input("API key", type="password", help="Free Gemini key: https://aistudio.google.com/apikey")
+    base_url = st.text_input("Base URL (filled in for you)", value=default_url, key=f"url_{preset}")
 
-run = st.button("Find promos", type="primary", disabled=not (uploads and key and model))
-if not (uploads and key and model):
-    st.info("Upload the episode files and enter an API key to start. A 4-episode test takes about 1-2 minutes "
-            "on a free key; all 50 episodes about 20-30 minutes.")
+run = st.button("Find promos", type="primary", disabled=not (uploads and key and model and base_url))
+if not (uploads and key and model and base_url):
+    st.info("Upload the episode files, choose a provider and paste an API key to start.")
 
 
 def save_uploads(files, folder):
@@ -89,27 +96,50 @@ if run:
         st.stop()
     st.write(f"Saved {n} episode files. Running...")
 
-    env = {**os.environ, "LLM_PROVIDER": provider, "LLM_API_KEY": key, "LLM_MODEL": model.strip(),
-           "LLM_BASE_URL": base_url.strip(), "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"}
+    env = {**os.environ, "LLM_PROVIDER": provider, "LLM_API_KEY": key.strip(), "LLM_MODEL": model.strip(),
+           "LLM_BASE_URL": base_url.strip(), "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1",
+           "SECONDS_BETWEEN_CALLS": "0" if paid else "7"}
     cmd = [sys.executable, str(HERE / "run.py"), "--input", str(data), "--out", str(out)]
     if episodes.strip():
         cmd += ["--episodes", episodes.strip()]
 
+    stages = [("STEP 1", 0.05, "Reading the scripts"), ("STEP 2", 0.10, "Finding candidate promos (LLM)"),
+              ("STEP 3", 0.55, "Checking timestamps and removing duplicates"),
+              ("STEP 4", 0.60, "Cold-viewer judge is scoring each clip (LLM)"),
+              ("STEP 5", 0.90, "Ranking"), ("Done.", 1.0, "Done")]
+    bar = st.progress(0.0, text="Starting...")
+    st.caption("Each model call can take 20-60 seconds. Keep this tab open until it finishes.")
     log_box = st.empty()
     lines = []
-    with st.spinner("Finding promos (the free tier waits a few seconds between calls)..."):
-        proc = subprocess.Popen(cmd, cwd=tmp, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in proc.stdout:
-            lines.append(line.rstrip())
-            log_box.code("\n".join(lines[-25:]))
-        proc.wait()
+    proc = subprocess.Popen(cmd, cwd=tmp, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for line in proc.stdout:
+        lines.append(line.rstrip())
+        for tag, frac, label in stages:
+            if line.strip().startswith(tag):
+                bar.progress(frac, text=label)
+        if "candidates" in line and line.strip().startswith("episodes"):
+            bar.progress(min(0.5, 0.1 + 0.05 * sum("candidates" in x for x in lines)), text="Finding: " + line.strip())
+        if line.strip().startswith("judged"):
+            bar.progress(0.75, text="Judging: " + line.strip())
+        log_box.code("\n".join(lines[-25:]))
+    proc.wait()
+    bar.progress(1.0, text="Finished")
     st.session_state["out"] = str(out)
     st.session_state["log"] = "\n".join(lines)
 
 if "out" in st.session_state:
     out = Path(st.session_state["out"])
     if not (out / "promos.json").exists():
-        st.error("The run did not finish. See the log below (quota or a wrong key/model are the usual reasons).")
+        log = st.session_state["log"]
+        if "quota" in log.lower() or "429" in log:
+            st.error("The model's quota/rate limit was hit. Try again in a minute, or choose another model "
+                     "(for Gemini free keys: gemini-3.5-flash or gemini-flash-lite-latest).")
+        elif "401" in log or "403" in log or "API key" in log:
+            st.error("The API key was rejected. Check the key and that it belongs to the chosen provider.")
+        elif "404" in log:
+            st.error("Model not found. Check the exact model name for this provider.")
+        else:
+            st.error("The run did not finish. See the log below.")
         st.code(st.session_state["log"][-4000:])
         st.stop()
 
