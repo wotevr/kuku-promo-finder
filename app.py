@@ -66,9 +66,9 @@ st.set_page_config(page_title="Kuku Promo Finder", page_icon="🎬", layout="wid
 st.markdown("""
 <style>
 .block-container {padding-top: 3.5rem; max-width: 1200px;}
-.hero {background: linear-gradient(135deg, #ff4b5c 0%, #c2185b 55%, #6a1b9a 100%);
+.hero {background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #4c1d95 100%);
        border-radius: 18px; padding: 28px 32px; margin-bottom: 18px; color: #fff;
-       box-shadow: 0 10px 30px rgba(194, 24, 91, 0.25);}
+       box-shadow: 0 10px 30px rgba(109, 40, 217, 0.25);}
 .hero h1 {color: #fff; font-size: 2.3rem; margin: 0 0 6px 0; padding: 0; font-weight: 800;}
 .hero p {color: rgba(255,255,255,0.92); font-size: 1.02rem; margin: 0 0 14px 0; line-height: 1.5;}
 .hero a {color: #fff; text-decoration: underline;}
@@ -78,8 +78,8 @@ st.markdown("""
 div[data-testid="stExpander"] {border-radius: 12px;}
 div[data-testid="stFileUploader"] section {border-radius: 12px;}
 div.stButton > button[kind="primary"] {border-radius: 10px; padding: 0.55rem 1.6rem; font-weight: 700;
-       background: linear-gradient(135deg, #ff4b5c, #c2185b); border: none;
-       box-shadow: 0 4px 14px rgba(255, 75, 92, 0.35);}
+       background: linear-gradient(135deg, #7c3aed, #5b21b6); border: none; color: #fff;
+       box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35);}
 div.stButton > button[kind="primary"]:hover {filter: brightness(1.08);}
 div[data-testid="stDownloadButton"] > button {border-radius: 10px;}
 div[data-testid="stCodeBlock"] pre, .stCode {border-radius: 12px;}
