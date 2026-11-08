@@ -15,6 +15,7 @@ Steps:
 import argparse
 import hashlib
 import json
+import re
 import time
 from collections import Counter
 from pathlib import Path
@@ -113,17 +114,47 @@ def judge(promos, lines_df):
         clips = "\n\n".join(f"### CLIP {p['promo_id']}\n{checks.clip_text(p['segs'], lines_df)}" for p in batch)
         answer = ask(f"judge_{batch[0]['promo_id']}-{batch[-1]['promo_id']}",
                      prompts.JUDGE_SYSTEM, prompts.JUDGE_USER.format(n=len(batch), clips=clips))
-        for c in answer.get("clips", []) if isinstance(answer, dict) else []:
-            results[str(c.get("clip_id", "")).strip()] = c
+        clips = answer.get("clips") if isinstance(answer, dict) else None
+        if not isinstance(clips, list):  # some models use another key: take the first list in the answer
+            clips = next((v for v in answer.values() if isinstance(v, list)), []) if isinstance(answer, dict) else []
+        for c in clips:
+            if not isinstance(c, dict):
+                continue
+            m = re.search(r"P\d+", str(c.get("clip_id") or c.get("id") or c.get("clip") or ""))
+            if m:
+                results[m.group()] = c
         print(f"  judged {min(i + len(batch), len(promos))}/{len(promos)}")
     return results
 
 
 def score_1_to_5(value):
+    """Accept 4, 4.0, "4", "4/5", "4 out of 5", {"score": 4} ... -> 4.0 (clamped to 1-5). Unreadable -> NaN."""
+    if isinstance(value, dict):
+        value = next((value[k] for k in ("score", "value", "rating") if k in value), None)
+    if isinstance(value, str):
+        m = re.search(r"\d+(?:\.\d+)?", value)
+        value = m.group() if m else None
     try:
-        return float(min(5, max(1, int(value))))
+        return float(min(5, max(1, round(float(value)))))
     except (TypeError, ValueError):
         return np.nan
+
+
+SCORE_KEYS = {  # the names different models use for the same score
+    "hook_strength": ["hook_strength", "hook", "hook_score"],
+    "cliffhanger_strength": ["cliffhanger_strength", "cliffhanger", "cliffhanger_score"],
+    "makes_sense_alone": ["makes_sense_alone", "standalone", "sense", "makes_sense", "stands_alone"],
+}
+
+
+def find_score(verdict, name):
+    """Look for a score under any of its usual names, also inside a nested "scores" object."""
+    places = [verdict] + [verdict[k] for k in ("scores", "score") if isinstance(verdict.get(k), dict)]
+    for place in places:
+        for key in SCORE_KEYS[name]:
+            if key in place:
+                return score_1_to_5(place[key])
+    return np.nan
 
 
 # ------------------------------------------------------------------ step 5: RANK
@@ -324,7 +355,7 @@ def main():
         p.update({k: v.get(k, "") for k in ["who_are_they", "what_is_happening", "what_is_unresolved",
                                             "hook_evidence", "cliffhanger_evidence", "sense_evidence"]})
         for k in ["hook_strength", "cliffhanger_strength", "makes_sense_alone"]:
-            p[k] = score_1_to_5(v.get(k))
+            p[k] = find_score(v, k)
         if any(np.isnan(p[k]) for k in config.WEIGHTS):
             rejected.append({"promo_id": p["promo_id"], "window": p["window"], "stage": "judge",
                              "reason": "judge gave unreadable scores", "raw_segments": segs_to_text(p["segs"]),

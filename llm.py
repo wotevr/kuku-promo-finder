@@ -13,6 +13,7 @@ run that stops halfway (e.g. the free daily quota runs out) continues where it l
 import json
 import os
 import re
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -29,19 +30,51 @@ class QuotaExhausted(Exception):
     pass
 
 
+_EXHAUSTED_FILE = Path(tempfile.gettempdir()) / "kuku_models_out_of_daily_quota.json"
+
+
+def _exhausted_today():
+    """Models that hit their free DAILY quota in the last 6 hours (shared by all runs on this server)."""
+    try:
+        data = json.loads(_EXHAUSTED_FILE.read_text())
+        return {m for m, t in data.items() if time.time() - t < 6 * 3600}
+    except (OSError, ValueError):
+        return set()
+
+
+def _mark_exhausted(model):
+    try:
+        data = json.loads(_EXHAUSTED_FILE.read_text()) if _EXHAUSTED_FILE.exists() else {}
+        data[model] = time.time()
+        _EXHAUSTED_FILE.write_text(json.dumps(data))
+    except (OSError, ValueError):
+        pass
+
+
 def _post_with_fallback(messages):
     """
     Like _post, but if the model is out of quota / overloaded / not found, switch to the next model in
     LLM_FALLBACK_MODELS (comma-separated) and try again. Free tiers give each model its own daily quota.
+    Models known to be out of daily quota are skipped straight away.
     """
+    chain = [m.strip() for m in os.environ.get("LLM_FALLBACK_MODELS", "").split(",") if m.strip()]
+    tried = _state.setdefault("tried_models", set())
     while True:
+        current = settings()["model"]
+        skip = tried | _exhausted_today()
+        if chain and current in skip:
+            remaining = [m for m in chain if m not in skip]
+            if remaining:
+                print(f"    {current} is out of quota today; using {remaining[0]}")
+                os.environ["LLM_MODEL"] = remaining[0]
+                continue
         try:
             return _post(messages)
         except QuotaExhausted as e:
-            current = settings()["model"]
-            _state.setdefault("tried_models", set()).add(current)
-            chain = [m.strip() for m in os.environ.get("LLM_FALLBACK_MODELS", "").split(",") if m.strip()]
-            remaining = [m for m in chain if m not in _state["tried_models"]]
+            tried.add(current)
+            if "PerDay" in str(e) or "per day" in str(e).lower():
+                _mark_exhausted(current)
+            remaining = [m for m in chain if m not in tried | _exhausted_today()]
             if not remaining:
                 raise
             print(f"    {current} is unavailable right now ({str(e)[:60]}...); switching to {remaining[0]}")
