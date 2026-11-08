@@ -1,0 +1,4 @@
+pandas>=2.0
+numpy
+requests
+reportlab   # only for make_pdf.py

@@ -1,0 +1,18 @@
+# Kuku's screenplays are confidential: never commit them
+data/
+*.txt.zip
+*-script.zip
+
+# API keys
+.env
+
+# Run outputs quote the script: they are shared privately (Google Drive), not in the public repo
+outputs/
+smoke_out/
+test_out/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
