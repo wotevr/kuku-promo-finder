@@ -8,8 +8,10 @@ the cliffhanger, one line on why it works, and a ranked posting order.
 It does **not** train a model. It calls an existing LLM through an API for the judgement calls, and
 uses plain Python for everything that must be exact (timestamps, lengths, duplicates).
 
-**Optional web page:** `streamlit run app.py` opens a local page where you upload the episode files, paste a
-key and click "Find promos" (same pipeline as below).
+**Live web app:** https://kuku-promo-finder-5xt8rpvukhhcvq3drdeozg.streamlit.app/ - upload the episode files,
+choose a provider (Gemini, OpenAI, Claude, Groq, OpenRouter or any OpenAI-compatible API), paste a model name and
+key, click "Find promos". It runs the same pipeline as below; files and keys are not stored.
+(Locally: `streamlit run app.py`.)
 
 ## How it works (5 steps)
 
