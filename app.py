@@ -81,7 +81,8 @@ run = st.button("Find promos", type="primary", disabled=not (uploads and use_key
 if not (uploads and use_key and model and base_url):
     st.info("Upload the episode files (or the .zip) to start." + ("" if use_key else " Then paste an API key."))
 elif not key.strip():
-    st.caption("Using the built-in free Gemini key (limited daily quota). Paste your own key for heavy use.")
+    st.caption("API key left empty: the built-in free Gemini key will be used. It has a small free daily quota "
+               "(it resets every day). If that quota is used up, paste your own key above and run again.")
 
 
 def save_uploads(files, folder):
@@ -151,8 +152,9 @@ if "out" in st.session_state:
     if not (out / "promos.json").exists():
         log = st.session_state["log"]
         if "quota" in log.lower() or "429" in log:
-            st.error("The model's quota/rate limit was hit. Try again in a minute, or choose another model "
-                     "(for Gemini free keys: gemini-3.5-flash or gemini-flash-lite-latest).")
+            st.error("The free daily quota of this API key is used up (or the model is rate-limited). "
+                     "Paste your own API key in the 'API key' box (a free Gemini key: aistudio.google.com/apikey, "
+                     "or any provider from the list) and click Find promos again.")
         elif "401" in log or "403" in log or "API key" in log:
             st.error("The API key was rejected. Check the key and that it belongs to the chosen provider.")
         elif "404" in log:
