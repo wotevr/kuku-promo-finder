@@ -110,6 +110,24 @@ with col2:
         "If this model is busy or out of quota, automatically try other Gemini models", value=True)
     base_url = st.text_input("Base URL (filled in for you)", value=default_url, key=f"url_{preset}")
 
+key = "".join(key.split())  # drop spaces / line breaks picked up while copy-pasting
+if key.lower().startswith("bearer"):
+    key = key[6:]
+key_problem = ""
+if key:
+    if key.startswith(("AIza", "AQ.")) and provider != "gemini":  # a Google key pasted under another provider
+        st.info("That looks like a Google Gemini key, so Google Gemini will be used.")
+        provider, base_url = "gemini", "https://generativelanguage.googleapis.com/v1beta"
+        if not model.strip().startswith("gemini"):
+            model = "gemini-3.6-flash"
+    elif "openrouter" in base_url and not key.startswith("sk-or-"):
+        key_problem = ("This is not an OpenRouter key. OpenRouter keys start with sk-or-v1- and are about 70 characters long "
+                       f"(you pasted {len(key)} characters). Copy the full key from openrouter.ai/keys, or leave the box empty to use the built-in Gemini key.")
+    elif len(key) < 20:
+        key_problem = f"The API key looks cut off ({len(key)} characters). Paste the full key, or leave the box empty to use the built-in Gemini key."
+if key_problem:
+    st.error(key_problem)
+
 using_builtin = not key.strip() and bool(demo_key())
 if using_builtin:  # no key typed: always use the built-in free Gemini key and model, whatever is selected above
     provider, base_url = "gemini", "https://generativelanguage.googleapis.com/v1beta"
@@ -117,7 +135,7 @@ if using_builtin:  # no key typed: always use the built-in free Gemini key and m
         model = "gemini-3.6-flash"
     auto_switch = True
 use_key = key.strip() or (demo_key() if using_builtin else "")
-run = st.button("Find promos", type="primary", disabled=not (uploads and use_key and model and base_url))
+run = st.button("Find promos", type="primary", disabled=bool(key_problem) or not (uploads and use_key and model and base_url))
 if not (uploads and use_key and model and base_url):
     st.info("Upload the episode files (or the .zip) to start." + ("" if use_key else " Then paste an API key."))
 elif using_builtin:
