@@ -16,3 +16,11 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Quote the confidential script: shared privately with the submission, not published
+results/
+FAILURES.md
+solution.md
+solution.pdf
+video_script.md
+speed_test.txt

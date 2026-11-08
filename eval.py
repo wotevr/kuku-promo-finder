@@ -32,9 +32,11 @@ def overlap_seconds(ep, a, b, segments):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="outputs")
-    out = Path(ap.parse_args().out)
+    ap.add_argument("--reviewer", default="the student", help="who wrote labels.csv / my_picks.csv")
+    args = ap.parse_args()
+    out = Path(args.out)
     promos = pd.read_json(out / "promos.json", encoding="utf-8")
-    report = ["# Evaluation against my own labels", ""]
+    report = ["# Evaluation against reviewer labels", "", f"Labels and reference picks written by: **{args.reviewer}**", ""]
 
     # ---------------- precision: how many of the tool's top picks are actually good?
     labels = pd.read_csv(out / "labels.csv", dtype=str, encoding="utf-8-sig", encoding_errors="replace").fillna("")
@@ -56,11 +58,11 @@ def main():
                 report.append(f"| precision@{k} lenient (good or ok) | {lenient:.0%} |")
         if rated.value.nunique() > 1 and rated.final_score.nunique() > 1:
             rho = rated["final_score"].corr(rated["value"], method="spearman")
-            report.append(f"| Spearman(tool score, my rating) | {rho:.2f} |")
+            report.append(f"| Spearman(tool score, reviewer rating) | {rho:.2f} |")
         report.append("")
         bad = rated[rated.my_rating == "bad"]
         if len(bad):
-            report += ["Promos I rated BAD (feed these into FAILURES.md):", ""]
+            report += ["Promos rated BAD (feed these into FAILURES.md):", ""]
             report += [f"- #{r.rank} {r.promo_id} {r.segments}: {r.my_note}" for r in bad.itertuples()]
             report.append("")
 
@@ -86,9 +88,9 @@ def main():
                         f"{'YES' if hit else 'no'} | {best[1].promo_id if hit else '-'} | "
                         f"{best[1].rank if hit else '-'} | {share:.0%} |")
         n = max(1, len(rows))
-        report += [f"Recall: the tool found **{found}/{len(rows)}** of my picks "
+        report += [f"Recall: the tool found **{found}/{len(rows)}** of the reviewer's reference picks "
                    f"({found / n:.0%}); {found_top20} of them are in its top 20.", "",
-                   "| my pick | note | found? | promo | tool rank | overlap |", "|---|---|---|---|---|---|"] + rows
+                   "| reference pick | note | found? | promo | tool rank | overlap |", "|---|---|---|---|---|---|"] + rows
 
     text = "\n".join(report)
     (out / "eval_results.md").write_text(text, encoding="utf-8")

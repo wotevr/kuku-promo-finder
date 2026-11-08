@@ -93,6 +93,26 @@ python run.py --input ./data --out outputs/                     # full show, ~30
 * A human editor stays in the loop: the tool shortlists and explains; the editor watches the top
   clips and approves. Their good/bad decisions are the labels to tune the prompts and weights later.
 
+## Results of the full run (50 episodes)
+
+| | |
+|---|---|
+| Candidates proposed / passed checks / unique / ranked | 101 / 101 / 81 / 81 |
+| API calls, tokens (in / out) | 26 calls, 186k / 142k |
+| Cost at paid prices ($0.30 / $2.50 per M tokens) | $0.41 for the show, $0.008 per episode, ~$41 for 100 shows x 50 episodes |
+| Independent review of the top 20 (a second model) | precision@10 60% good (90% good or ok); precision@20 50% (90%) |
+| Recall of the reviewer's own picks (eps 1, 10, 20, 30, 40, 50) | 4 of 6 found, 2 in the top 20 |
+| Spearman(tool score, review rating), top 20 | 0.06 - a good shortlist, but the order inside it is close to random |
+| Consistency (same FIND question asked twice, eps 40-46) | 75% of promos found again |
+
+**Known failures** (details with promo ids in `FAILURES.md`, shared with the outputs):
+the best entry-point clip (episode 1, jilted at the altar) ranks only #20; near-duplicate clips survive
+(26% overlap is under the 50% threshold); slow openings rank high when the cliffhanger is strong; one spoiler was
+missed; the "makes sense alone" score is 4/5 for 70 of 81 clips, so it barely separates them.
+
+`FAILURES.md`, the solution PDF and the run outputs quote Kuku's confidential script, so they are shared
+privately with the submission instead of being published here.
+
 ## Limits
 
 * It reads text only: it cannot see acting, faces, music or how a slap actually looks.
