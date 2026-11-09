@@ -20,6 +20,54 @@ key, click "Find promos". It runs the same pipeline as below; files and keys are
 
 (Locally: `streamlit run app.py`.)
 
+## If the web app does not work: run it in the terminal
+
+The web app and the terminal run the **same code**. If the web app is down or its free quota is used up,
+copy-paste these steps (about 10 minutes the first time). You need Python 3.10+ and your own API key
+(free Gemini key: https://aistudio.google.com/apikey).
+
+**Windows (Command Prompt)**
+```
+git clone https://github.com/wotevr/kuku-promo-finder
+cd kuku-promo-finder
+pip install -r requirements.txt
+copy .env.example .env
+notepad .env
+```
+In Notepad replace `paste-your-key-here` with your key, save and close. Then put the episode files
+(`episode-XXX-*.txt`, sub-folders are fine) in a folder called `data` inside `kuku-promo-finder`, and run:
+```
+python check_setup.py
+python run.py --input ./data --out outputs --episodes 1-4
+```
+
+**Mac / Linux (Terminal)**
+```
+git clone https://github.com/wotevr/kuku-promo-finder
+cd kuku-promo-finder
+pip install -r requirements.txt
+cp .env.example .env
+nano .env          # replace paste-your-key-here with your key, Ctrl+O, Enter, Ctrl+X
+mkdir data         # copy the episode files into this folder
+python check_setup.py
+python run.py --input ./data --out outputs --episodes 1-4
+```
+
+What you should see: `check_setup.py` prints `TEST CALL WORKED`. `run.py` prints STEP 1 to STEP 5 and
+the top 10, then `Done.` The results are in the `outputs` folder: open `outputs/ranked_promos.md` (any text
+editor, or VS Code preview). Remove `--episodes 1-4` to run all 50 episodes (~25 requests, 15-25 min on a free key).
+
+If something goes wrong:
+* Always run the commands **inside the `kuku-promo-finder` folder** (that is where `.env` is read from).
+* `python` not found: try `py` (Windows) or `python3` (Mac/Linux).
+* `LLM_API_KEY is not set`: the `.env` file is missing or the key line was not saved.
+* Quota / 429 error: run the **same command again** later; saved answers are reused and it continues where it
+  stopped. Or put another model in `.env` (e.g. `LLM_MODEL=gemini-flash-lite-latest`) or add
+  `LLM_FALLBACK_MODELS=gemini-3.5-flash,gemini-flash-lite-latest` to switch models automatically.
+* Using another provider (OpenAI, Groq, OpenRouter...): see the examples at the bottom of `.env.example`.
+* The web app can also run on your own computer: `streamlit run app.py`, then paste your key in the page
+  (the built-in key exists only on the hosted app).
+
 ## How it works (5 steps)
 
 | Step | Who does it | What happens |
