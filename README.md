@@ -11,6 +11,13 @@ uses plain Python for everything that must be exact (timestamps, lengths, duplic
 **Live web app:** https://kuku-promo-finder-5xt8rpvukhhcvq3drdeozg.streamlit.app/ - upload the episode files,
 choose a provider (Gemini, OpenAI, Claude, Groq, OpenRouter or any OpenAI-compatible API), paste a model name and
 key, click "Find promos". It runs the same pipeline as below; files and keys are not stored.
+* **Leave the API key box empty** to use the built-in free Gemini key (`gemini-3.6-flash`). If a model is busy or
+  its free daily quota is used up, it switches automatically to other Gemini models. The free quota resets every day
+  (about 1:30 PM IST); if it is used up, paste your own key.
+* **Paste your own key** to use your own provider and model. The app checks the key first (cut-off key, wrong key
+  for the provider) and accepts display names such as "Llama 3.3 70B" by looking up the exact model id.
+* For a quick demo, upload all episode files and type `1-4` in "Episodes to run" (about 2-4 minutes on a free key).
+
 (Locally: `streamlit run app.py`.)
 
 ## How it works (5 steps)
@@ -19,7 +26,7 @@ key, click "Find promos". It runs the same pipeline as below; files and keys are
 |---|---|---|
 | 1. READ | code | Parse every episode into a table of timed lines (dialogue, action, sound, camera). |
 | 2. FIND | LLM | One call writes a short story summary from the 50 loglines. Then the LLM reads **4 episodes at a time** (windows overlap by 1 episode, so a cliffhanger at the end of one episode and the opening of the next are always seen together) and proposes up to 6 promos per window, with timestamps. |
-| 3. CHECK | code | Rejects clips whose timestamps don't exist in the script, that are not 20-60 s, or whose segments are out of order. Moves cut points so no spoken line is cut in half. Removes duplicates (the same moment found by two overlapping windows). Every rejection is logged with its reason. |
+| 3. CHECK | code | Rejects clips whose timestamps don't exist in the script or whose segments are out of order. Fixes length by whole lines: a 10-20 s clip is extended to 20 s, a 60-75 s clip is trimmed to 60 s; clips under 10 s or over 75 s are rejected. Moves cut points so no spoken line is cut in half. Removes duplicates (the same moment found by two overlapping windows). Every rejection is logged with its reason. |
 | 4. JUDGE | LLM (separate calls) | A "cold viewer" sees **only the clip's own lines** - no summary, no context - and says who these people are, what is happening, what is unresolved, and whether a first-time viewer would follow it. Then it scores hook, cliffhanger and makes-sense-alone from 1 to 5, with one sentence of evidence each. |
 | 5. RANK | code + 1 LLM call | final score = hook + cliffhanger + makes-sense-alone (equal weights), minus 2 if the cold viewer could not follow it, minus 1-2 if it gives away a big late twist. The top 10 must be varied (max 3 clips of one type, e.g. slaps; no two starting within the same minute of an episode). One last call writes why each top-10 clip deserves its posting slot. |
 
@@ -46,13 +53,17 @@ code checks. A human editor still approves the final list (see "Quality check").
 ## Run
 
 ```
-python run.py --input ./data --out test_out/ --episodes 1-4     # quick test, 3 requests
+python run.py --input ./data --out test_out/ --episodes 1-4     # quick test, about 4 requests
 python run.py --input ./data --out outputs/                     # full show, ~30 requests, ~10-20 min
 ```
 
 * Every LLM answer is saved in `outputs/raw_llm/`. If the run stops (for example the free daily quota
   runs out), run the same command again: saved answers are reused and it continues where it stopped.
   You can also switch to another model/provider in `.env` and continue. `--fresh` ignores saved answers.
+* If a model's prompt limit is small (some OpenRouter hosts allow ~8k tokens), long episode windows and judge
+  batches are split into smaller pieces automatically.
+* Optional: `LLM_FALLBACK_MODELS=gemini-3.5-flash,gemini-flash-lite-latest` in `.env` makes the CLI switch to the
+  next model when one is busy or out of daily quota (the web app does this for you).
 * All settings (window size, weights, penalties, lengths, prices) are in `config.py`.
 * Free-tier models are sometimes overloaded. `python speed_test.py gemini-3.6-flash gemini-flash-latest ...`
   times one tiny request per model so you can pick a responsive one.
@@ -99,6 +110,10 @@ python run.py --input ./data --out outputs/                     # full show, ~30
   clips and approves. Their good/bad decisions are the labels to tune the prompts and weights later.
 
 ## Results of the full run (50 episodes)
+
+Measured on the full run submitted on 8 Nov 2026. Later commits only made the tool more robust (length fixing,
+reading judge scores in any format, faster model switching), so a new run gives similar but not identical numbers
+(LLM answers vary between runs).
 
 | | |
 |---|---|
